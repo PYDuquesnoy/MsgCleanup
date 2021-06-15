@@ -1,0 +1,7 @@
+{
+    "objectscript.conn": {
+        "server": "irishealth2020",
+        "ns": "ENSEMBLE",
+        "active": true
+    }
+}

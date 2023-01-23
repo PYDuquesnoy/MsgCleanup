@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Export generator="IRIS" version="26" zv="IRIS for Windows (x86-64) 2022.1 (Build 164U)" ts="2023-01-23 08:50:08">
+<Class name="PYD.Utils.StreamScan">
+<Description>
+Scans some Classes and Globals to Find Dangling Streams</Description>
+<Super>%RegisteredObject</Super>
+<TimeChanged>66494,50948.2630612</TimeChanged>
+<TimeCreated>66493,62744.6892255</TimeCreated>
+
+<Method name="FindA800S">
+<Description>
+The Database contains 2GB in this Stream Global [IFM.WSCRepD86F.infoInformeA800S] 
+from a Serial class Which is referenced by a Persistent Message class 
+[IFM.WSCRepositoriInformesWS.RSP.consultarInformeResponse] Stored in Ens.MessageBodyD
+
+This Code aims to Scan the Message Extent, extract the Id of the (Serial) Streams if present and Build a Temporary List of them.
+The, it scans the A800S (in order) and checks if they ara referenced. It counts and lists the non Referenced ones</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>isPurge:%Boolean=0,isVerbose:%Boolean=1</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#DIM tSC as %Status=$$$OK
+	#DIM errObj as %Exception.AbstractException
+	try {
+		if (isVerbose) { Write "Starting Scan of IFM_WSCRepositoriInformesWS_RSP.consultarInformeResponse..." }
+		kill ^||Response
+		set tSql="Select ID from IFM_WSCRepositoriInformesWS_RSP.consultarInformeResponse order by ID"
+		set tRS=##class(%SQL.Statement).%ExecDirect(,tSql)
+		while (tRS.%Next()) {
+			//Extract the Row and the ID of the Refence in the A800 Global if exists
+			set tID=tRS.%Get("ID")
+			set tRow=$get(^Ens.MessageBodyD(tID,"consultarInformeResponse"))
+			set tA800SID=$listget($listget(tRow,1),1)
+			if (tA800SID'="") {  //This is the
+				set ^||Response(tA800SID)=tID
+			}
+		}
+		if (isVerbose) { Write "Finished Scan",!,! }
+		//So now we have a list of all Streams in A800S which are referenced from the Message
+		set tMissing=0   //Count the Missing References
+		set tOK=0        //Count the OK References
+		set tPurged=0    //Count the Purged Streams
+		set tLastMsgId=""    //Keep Track of last previous OK ID value in Ens.Response (so we can maybe infer its DateTime through Ens.MessageHeader)
+		set tIX=$Order(^IFM.WSCRepD86F.infoInformeA800S(""))  //This is the Stream Global that may have dangling pointers
+		while (tIX'="") {
+			if $Data(^||Response(tIX)) {
+				set tOK=tOK+1
+				set lastMsgId=$get(^||Response(tIX))
+			}else {
+				set tMissing=tMissing+1
+				if (isVerbose) { Write "Stream=",tIX," (LastID="_tLastMsgId_") ; " }
+				if (isPurge) {
+					set tPurged=tPurged+1
+					kill ^IFM.WSCRepD86F.infoInformeA800S(tIX)
+				}
+			}
+			set tIX=$Order(^IFM.WSCRepD86F.infoInformeA800S(tIX)) 
+		}
+		Write !,!,"Missing Count:",tMissing,!
+		Write "OK Count: ",tOK,!
+		Write "Purged: ",tPurged,!
+	
+		Write "Done",!	
+	}catch (errObj) {
+		Write "Catch:",errObj.DisplayString()
+		set tSC=errObj.AsStatus()
+	}
+	quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="DemoIFM">
+<Description>
+Show how to manually force dangling Streams: Works well 
+Warning: DO NOT RUN IN PRODUCTION</Description>
+<ClassMethod>1</ClassMethod>
+<Implementation><![CDATA[
+	if $zu(110)'="ES-XPS15DUQUESN" Write "Wrong Server,!" QUIT
+	//---
+	do ##class(IFM.DAT.DadesModificarProposta).%KillExtent()
+	kill ^IFM.DAT.DadesModifiF0A3D,^IFM.DAT.DadesModifiF0A3S
+	//
+	set tObj=##class(IFM.DAT.DadesModificarProposta).%New()
+	set xTemp=##class(%Stream.GlobalCharacter).%New()
+	do xTemp.Write("Sending this data to a better place")
+	//Write "Saving, tSC=",tObj.%Save(0),!
+	do tObj.CDA.CopyFromAndSave(xTemp)
+	set x2=##class(%Stream.GlobalCharacter).%New()
+	do x2.Write("You'll never get this space back!")
+	do tObj.ContingutaSubstituir.CopyFromAndSave(x2)
+	kill tObj  //Or let it go out of scope, same thing...
+	Write "Data Global:",! zwrite ^IFM.DAT.DadesModifiF0A3D write !
+	Write "Stream global:",! zwrite ^IFM.DAT.DadesModifiF0A3S write !
+]]></Implementation>
+</Method>
+
+<Method name="FindIFMModif">
+<Description>
+The Database contains 20GB in this Stream Global [IFM.DAT.DadesModifiF0A3S] 
+This Stream is IFM.DAT.DadesModifiF0A3S
+The Main Persistent table used in the Context Object of a BP is
+IFM.DAT.DadesModificarProposta
+the Data Global of the main Table is
+^IFM.DAT.DadesModifiF0A3D
+The Data Global Contains 2 Streams</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>isPurge:%Boolean=0</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#DIM tSC as %Status=$$$OK
+	#DIM errObj as %Exception.AbstractException
+	try {
+		if (isVerbose) { Write "Starting Scan of IFM.DAT.DadesModificarProposta..." }
+		kill ^||ListCDA
+		Kill ^||ListConti
+		set tSql="Select ID from IFM._DAT.DadesModificarProposta order by ID"
+		set tRS=##class(%SQL.Statement).%ExecDirect(,tSql)
+		while (tRS.%Next()) {
+			//Extract the Row and the ID of the References to the CDA and ContingutaSubstituir blobs
+			set tID=tRS.%Get("ID")
+			set tRow=$get(^Ens.MessageBodyD(tID))
+			set tCDAID=$listget(tRow,2)
+			set tConti=$listget(tRow,3)
+			set:(tCDAID'="") ^||ListCDA(tCDAID)=tID
+			set:(tConti'="") ^||ListConti(tConti)=tID
+		}
+		if (isVerbose) { Write "Finished Scan",!,! }
+		//So now we have a list of all Streams in A800S which are referenced from the Message
+		set tMissing=0   //Count the Missing References
+		set tOKCDA=0        //Count the OK References
+		set tOKConti=0
+		set tPurged=0    //Count the Purged Streams
+		set tLastMsgId=""    //Keep Track of last previous OK ID value in Ens.Response (so we can maybe infer its DateTime through Ens.MessageHeader)
+		set tIX=$Order(^IFM.DAT.DadesModifiF0A3S(""))  //This is the Stream Global that may have dangling pointers
+		while (tIX'="") {
+			if $Data(^||ListCDA(tIX)) {
+				set tOKCDA=tOKCDA+1
+				set lastMsgId=$get(^||ListCDA(tIX))
+				
+			}elseif $Data(^||ListConti(tIX)) {
+				set tOKConti=tOKConti+1
+				set lastMsgId=$get(^||ListConti(tIX))
+				
+			} else {
+				set tMissing=tMissing+1
+				if (isVerbose) { Write "Stream=",tIX," (LastID="_tLastMsgId_") ; " }
+				if (isPurge) {
+					set tPurged=tPurged+1
+					kill ^IFM.DAT.DadesModifiF0A3S(tIX)
+				}
+			}
+			set tIX=$Order(^IFM.DAT.DadesModifiF0A3S(tIX)) 
+		}
+		Write !,!,"Missing Count:",tMissing,!
+		Write "OK CDA Count: ",tOKCDA,!
+		Write "OK Contingut Count:",tOKConti,!
+		Write "Purged: ",tPurged,!
+		
+	}catch (errObj) {
+		Write "Catch:",errObj.DisplayString()
+		set tSC=errObj.AsStatus()
+	}
+	quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="PurgeEventLogs">
+<Description><![CDATA[
+Purge the EventLog without generating too much Journal
+Or Directly throuugh SQL: 
+Delete %NOLOCK %NOJOURN FROM Ens_Util.Log where timelogged < '2023-01-17']]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pNumberToKeep:%Integer=1000,pMaxNumberToDelete:%Integer=-1,*pLogsDeleted:%Integer</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	New %tFirstIdToKeep
+	Set tFirstId = $o(^Ens.Util.LogD(""))
+	Set tLastId = $o(^Ens.Util.LogD(""),-1)
+	Set tRightMargin = tLastId-pNumberToKeep
+	If pMaxNumberToDelete=-1 {
+		Set tLeftMargin = tRightMargin+1
+	} Else {
+		Set tLeftMargin = tFirstId+pMaxNumberToDelete
+	}
+	Set %tFirstIdToKeep = $s(tLeftMargin>tRightMargin:tRightMargin+1,1:tLeftMargin)
+	If %tFirstIdToKeep'>tFirstId Set pLogsDeleted = 0 Quit $$$OK
+	&sql(Delete %NOLOCK %NOJOURN From Ens_Util.Log where Id < :%tFirstIdToKeep)
+	Set pLogsDeleted = $get(%ROWCOUNT)
+	Quit $$$OK
+]]></Implementation>
+</Method>
+
+<UDLText name="T">
+<Content><![CDATA[
+/* 
+ List of Globals with *too much* data:
+ 1.7 GB CacheStream
+ 2.5 GB Colom
+ 1.7 Gb Comunicat
+ 2   GB MessageBodyD
+14   GB MessageBodyS
+ 4   GB MessageHeaderD
+12   GB Ens.Util.logD
+ 1   GB XML
+ 2.4 GB HL7
+20   GB IFM.DAT.DadesModifiF0A3S
+ 2   GB IFM.WSCRepD86F.infoInformeA800S
+ 
+*/
+]]></Content>
+</UDLText>
+
+<Method name="ShowBadSettings">
+<Description>
+Scans the Current Production and List All Components that have "Log trace Events" or "ArchiveIO" enabled
+Optionally disable and update productio</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>isUpdate:%Boolean=0</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#DIM tSC as %Status=$$$OK
+	#DIM errObj as %Exception.AbstractException
+	try {
+		//Get the Production: Not Really Needed?
+		$$$THROWONERROR(tSC,##class(Ens.Director).GetProductionStatus(.tProductionName,.tState))
+		//
+		//All ConfigItems in Namespace
+		set tSql="select ID,Name from Ens_Config.Item"
+		set tRS=##class(%SQL.Statement).%ExecDirect(,tSql)
+		while (tRS.%Next()) {
+			set tID=tRS.%Get("ID")
+			//Write tID,":",tRS.%Get("Name"),!
+			set tItem=##class(Ens.Config.Item).%OpenId(tID)
+			
+			if tItem.LogTraceEvents=1 {
+				Write "Log! "_tItem.Name_"->LogTraceEvents=1",!
+				if isUpdate { set tItem.LogTraceEvents=0 $$$THROWONERROR(tSC,tItem.%Save(1)) }
+			}
+			//Loop over Settings of this config Item
+			for tIx=1:1:tItem.Settings.Count() {
+				set tSetting=tItem.Settings.GetAt(tIx)
+				if (tSetting.Name="ArchiveIO") {
+					//Need to validate if set to false/disabled
+					//Write $c(9),tItem.Name_"->"_tSetting.Name_"="_tSetting.Value,!
+					if tSetting.Value=1 {
+						Write "Log! "_tItem.Name_"->"_tSetting.Name_"="_tSetting.Value,!
+						if isUpdate { set tSetting.Value=0 $$$THROWONERROR(tSC,tItem.%Save(1)) }
+					}
+				}
+			}
+		}
+		if isUpdate { Write "Updating Production!",! do ##class(Ens.Director).UpdateProduction(.tSC) }
+	}catch (errObj) {
+		Write "Catch:",errObj.DisplayString()
+		set tSC=errObj.AsStatus()
+	}
+	quit tSC
+]]></Implementation>
+</Method>
+</Class>
+</Export>
